@@ -28,6 +28,17 @@ interface StudentInfo {
   room: string;
 }
 
+interface StatusLog {
+  id: number;
+  repair_id: number;
+  status: string;
+  operator_id: number | null;
+  operator_name: string;
+  operator_role: string | null;
+  remark: string | null;
+  created_at: string;
+}
+
 const statusMap: Record<string, { label: string; color: string; bg: string }> = {
   pending: { label: '待受理', color: '#faad14', bg: '#fffbe6' },
   processing: { label: '处理中', color: '#1890ff', bg: '#e6f7ff' },
@@ -225,6 +236,83 @@ const styles: Record<string, React.CSSProperties> = {
     objectFit: 'contain' as const,
     borderRadius: '8px',
   },
+  logTimeline: {
+    position: 'relative' as const,
+    paddingLeft: '8px',
+  },
+  logItem: {
+    position: 'relative' as const,
+    paddingLeft: '28px',
+    paddingBottom: '20px',
+    borderLeft: '2px solid #e8e8e8',
+  },
+  logItemLast: {
+    borderLeft: '2px solid transparent',
+  },
+  logDot: {
+    position: 'absolute' as const,
+    left: '-7px',
+    top: '0',
+    width: '12px',
+    height: '12px',
+    borderRadius: '50%',
+    background: '#1890ff',
+    border: '2px solid #fff',
+    boxShadow: '0 0 0 2px #1890ff',
+  },
+  logDotPending: {
+    background: '#faad14',
+    boxShadow: '0 0 0 2px #faad14',
+  },
+  logDotProcessing: {
+    background: '#1890ff',
+    boxShadow: '0 0 0 2px #1890ff',
+  },
+  logDotResolved: {
+    background: '#52c41a',
+    boxShadow: '0 0 0 2px #52c41a',
+  },
+  logContent: {
+    background: '#fafafa',
+    borderRadius: '8px',
+    padding: '12px 16px',
+    marginBottom: '4px',
+  },
+  logTitle: {
+    fontSize: '14px',
+    fontWeight: 600,
+    color: '#333',
+    marginBottom: '4px',
+  },
+  logMeta: {
+    fontSize: '12px',
+    color: '#999',
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  logOperator: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '6px',
+  },
+  logRoleBadge: {
+    fontSize: '11px',
+    padding: '1px 6px',
+    borderRadius: '4px',
+    background: '#e6f7ff',
+    color: '#1890ff',
+  },
+  logRoleBadgeAdmin: {
+    background: '#fff7e6',
+    color: '#fa8c16',
+  },
+  logRemark: {
+    fontSize: '13px',
+    color: '#666',
+    marginTop: '6px',
+    lineHeight: '1.6',
+  },
 };
 
 export default function AdminRepairDetail() {
@@ -233,6 +321,7 @@ export default function AdminRepairDetail() {
   const navigate = useNavigate();
   const [repair, setRepair] = useState<Repair | null>(null);
   const [studentInfo, setStudentInfo] = useState<StudentInfo | null>(null);
+  const [logs, setLogs] = useState<StatusLog[]>([]);
   const [loading, setLoading] = useState(true);
   const [assignedTo, setAssignedTo] = useState('');
   const [adminComment, setAdminComment] = useState('');
@@ -250,6 +339,7 @@ export default function AdminRepairDetail() {
       const res = await api.get(`/repairs/${id}`);
       setRepair(res.data.repair);
       setStudentInfo(res.data.student);
+      setLogs(res.data.logs || []);
       setAssignedTo(res.data.repair.assigned_to || '');
       setAdminComment(res.data.repair.admin_comment || '');
       setNewStatus(res.data.repair.status);
@@ -274,8 +364,8 @@ export default function AdminRepairDetail() {
         return;
       }
 
-      const res = await api.put(`/admin/repairs/${id}`, payload);
-      setRepair(res.data.repair);
+      await api.put(`/admin/repairs/${id}`, payload);
+      await fetchRepair();
       setSuccess('更新成功');
     } catch (err: unknown) {
       const axiosErr = err as { response?: { data?: { error?: string } } };
@@ -396,6 +486,58 @@ export default function AdminRepairDetail() {
             </div>
           )}
         </div>
+
+        {/* Process logs */}
+        {logs.length > 0 && (
+          <div style={styles.card}>
+            <div style={styles.sectionTitle}>处理过程</div>
+            <div style={styles.logTimeline}>
+              {logs.map((log, index) => {
+                const isLast = index === logs.length - 1;
+                const dotStyle = log.status === 'pending'
+                  ? styles.logDotPending
+                  : log.status === 'processing'
+                  ? styles.logDotProcessing
+                  : styles.logDotResolved;
+                const statusInfo = statusMap[log.status] || statusMap.pending;
+                return (
+                  <div
+                    key={log.id}
+                    style={{
+                      ...styles.logItem,
+                      ...(isLast ? styles.logItemLast : {}),
+                    }}
+                  >
+                    <div style={{ ...styles.logDot, ...dotStyle }} />
+                    <div style={styles.logContent}>
+                      <div style={styles.logTitle}>
+                        <span style={{ color: statusInfo.color }}>●</span>{' '}
+                        {statusInfo.label}
+                      </div>
+                      <div style={styles.logMeta}>
+                        <div style={styles.logOperator}>
+                          <span>{log.operator_name || '系统'}</span>
+                          <span
+                            style={{
+                              ...styles.logRoleBadge,
+                              ...(log.operator_role === 'admin' ? styles.logRoleBadgeAdmin : {}),
+                            }}
+                          >
+                            {log.operator_role === 'admin' ? '管理员' : '学生'}
+                          </span>
+                        </div>
+                        <span>{log.created_at}</span>
+                      </div>
+                      {log.remark && (
+                        <div style={styles.logRemark}>{log.remark}</div>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
 
         {/* Action card */}
         <div style={styles.card}>

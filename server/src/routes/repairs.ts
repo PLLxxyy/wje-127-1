@@ -14,11 +14,27 @@ router.post('/', (req: AuthRequest, res: Response) => {
       return;
     }
 
-    const result = db.prepare(
+    const insertStmt = db.prepare(
       'INSERT INTO repairs (student_id, building, room, problem_type, description, photos) VALUES (?, ?, ?, ?, ?, ?)'
-    ).run(req.userId!, building, room, problem_type, description, JSON.stringify(photos || []));
+    );
 
-    const repair = db.prepare('SELECT * FROM repairs WHERE id = ?').get(result.lastInsertRowid) as Record<string, unknown>;
+    const logStmt = db.prepare(
+      'INSERT INTO repair_status_logs (repair_id, status, operator_id, operator_name, operator_role, remark) VALUES (?, ?, ?, ?, ?, ?)'
+    );
+
+    const transaction = db.transaction(() => {
+      const result = insertStmt.run(req.userId!, building, room, problem_type, description, JSON.stringify(photos || []));
+      const repairId = result.lastInsertRowid as number;
+
+      const user = db.prepare('SELECT name, role FROM users WHERE id = ?').get(req.userId!) as { name: string; role: string } | undefined;
+      logStmt.run(repairId, 'pending', req.userId!, user?.name || '', user?.role || 'student', '提交报修申请');
+
+      return repairId;
+    });
+
+    const repairId = transaction();
+
+    const repair = db.prepare('SELECT * FROM repairs WHERE id = ?').get(repairId) as Record<string, unknown>;
     if (repair && typeof repair.photos === 'string') {
       repair.photos = JSON.parse(repair.photos as string);
     }
@@ -71,7 +87,12 @@ router.get('/:id', (req: AuthRequest, res: Response) => {
     // Get student info
     const student = db.prepare('SELECT name, username, phone, building, room FROM users WHERE id = ?').get(repair.student_id as number) as Record<string, unknown> | undefined;
 
-    res.json({ repair, student });
+    // Get status logs
+    const logs = db.prepare(
+      'SELECT * FROM repair_status_logs WHERE repair_id = ? ORDER BY created_at ASC, id ASC'
+    ).all(req.params.id) as Record<string, unknown>[];
+
+    res.json({ repair, student, logs });
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : '获取报修详情失败';
     res.status(500).json({ error: message });

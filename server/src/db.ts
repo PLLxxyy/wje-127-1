@@ -46,6 +46,18 @@ db.exec(`
     updated_at TEXT DEFAULT (datetime('now', 'localtime')),
     FOREIGN KEY (student_id) REFERENCES users(id)
   );
+
+  CREATE TABLE IF NOT EXISTS repair_status_logs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    repair_id INTEGER NOT NULL,
+    status TEXT NOT NULL,
+    operator_id INTEGER,
+    operator_name TEXT,
+    operator_role TEXT,
+    remark TEXT,
+    created_at TEXT DEFAULT (datetime('now', 'localtime')),
+    FOREIGN KEY (repair_id) REFERENCES repairs(id)
+  );
 `);
 
 export default db;

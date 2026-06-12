@@ -52,6 +52,8 @@ router.put('/repairs/:id', (req: AuthRequest, res: Response) => {
     const updates: string[] = ['updated_at = ?'];
     const values: unknown[] = [now];
 
+    const statusChanged = status !== undefined && status !== repair.status;
+
     if (status !== undefined) {
       updates.push('status = ?');
       values.push(status);
@@ -66,7 +68,28 @@ router.put('/repairs/:id', (req: AuthRequest, res: Response) => {
     }
 
     values.push(req.params.id);
-    db.prepare(`UPDATE repairs SET ${updates.join(', ')} WHERE id = ?`).run(...values);
+
+    const updateStmt = db.prepare(`UPDATE repairs SET ${updates.join(', ')} WHERE id = ?`);
+    const logStmt = db.prepare(
+      'INSERT INTO repair_status_logs (repair_id, status, operator_id, operator_name, operator_role, remark) VALUES (?, ?, ?, ?, ?, ?)'
+    );
+
+    const transaction = db.transaction(() => {
+      updateStmt.run(...values);
+
+      if (statusChanged) {
+        const user = db.prepare('SELECT name, role FROM users WHERE id = ?').get(req.userId!) as { name: string; role: string } | undefined;
+        const statusLabelMap: Record<string, string> = {
+          pending: '待受理',
+          processing: '处理中',
+          resolved: '已修好',
+        };
+        const remark = `状态变更为：${statusLabelMap[status as string] || status}`;
+        logStmt.run(req.params.id, status, req.userId!, user?.name || '', user?.role || 'admin', remark);
+      }
+    });
+
+    transaction();
 
     const updated = db.prepare('SELECT * FROM repairs WHERE id = ?').get(req.params.id) as Record<string, unknown>;
     if (typeof updated.photos === 'string') {
