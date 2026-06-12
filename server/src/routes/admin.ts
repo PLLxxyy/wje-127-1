@@ -53,6 +53,8 @@ router.put('/repairs/:id', (req: AuthRequest, res: Response) => {
     const values: unknown[] = [now];
 
     const statusChanged = status !== undefined && status !== repair.status;
+    const assignedChanged = assigned_to !== undefined && assigned_to !== (repair.assigned_to || '');
+    const commentChanged = admin_comment !== undefined && admin_comment !== (repair.admin_comment || '');
 
     if (status !== undefined) {
       updates.push('status = ?');
@@ -77,15 +79,31 @@ router.put('/repairs/:id', (req: AuthRequest, res: Response) => {
     const transaction = db.transaction(() => {
       updateStmt.run(...values);
 
+      const user = db.prepare('SELECT name, role FROM users WHERE id = ?').get(req.userId!) as { name: string; role: string } | undefined;
+      const operatorName = user?.name || '';
+      const operatorRole = user?.role || 'admin';
+      const statusLabelMap: Record<string, string> = {
+        pending: '待受理',
+        processing: '处理中',
+        resolved: '已修好',
+      };
+      const currentStatus = (status !== undefined ? status : repair.status) as string;
+
       if (statusChanged) {
-        const user = db.prepare('SELECT name, role FROM users WHERE id = ?').get(req.userId!) as { name: string; role: string } | undefined;
-        const statusLabelMap: Record<string, string> = {
-          pending: '待受理',
-          processing: '处理中',
-          resolved: '已修好',
-        };
         const remark = `状态变更为：${statusLabelMap[status as string] || status}`;
-        logStmt.run(req.params.id, status, req.userId!, user?.name || '', user?.role || 'admin', remark);
+        logStmt.run(req.params.id, status, req.userId!, operatorName, operatorRole, remark);
+      }
+      if (assignedChanged) {
+        const remark = assigned_to
+          ? `指派维修员：${assigned_to}`
+          : '取消维修员指派';
+        logStmt.run(req.params.id, currentStatus, req.userId!, operatorName, operatorRole, remark);
+      }
+      if (commentChanged) {
+        const remark = admin_comment
+          ? `更新处理意见：${admin_comment}`
+          : '清空处理意见';
+        logStmt.run(req.params.id, currentStatus, req.userId!, operatorName, operatorRole, remark);
       }
     });
 

@@ -351,8 +351,8 @@ export default function RepairDetail() {
     if (!rating) return;
     setSubmitting(true);
     try {
-      const res = await api.put(`/repairs/${id}/rate`, { rating, review });
-      setRepair(res.data.repair);
+      await api.put(`/repairs/${id}/rate`, { rating, review });
+      await fetchRepair();
     } catch (err: unknown) {
       const axiosErr = err as { response?: { data?: { error?: string } } };
       alert(axiosErr.response?.data?.error || '评价失败');

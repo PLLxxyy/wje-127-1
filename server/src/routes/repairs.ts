@@ -87,6 +87,47 @@ router.get('/:id', (req: AuthRequest, res: Response) => {
     // Get student info
     const student = db.prepare('SELECT name, username, phone, building, room FROM users WHERE id = ?').get(repair.student_id as number) as Record<string, unknown> | undefined;
 
+    // Ensure historical repairs have initial log (auto backfill)
+    const existingLogs = db.prepare(
+      'SELECT COUNT(*) as cnt FROM repair_status_logs WHERE repair_id = ?'
+    ).get(req.params.id) as { cnt: number };
+
+    if (existingLogs.cnt === 0) {
+      const backfillStmt = db.prepare(
+        'INSERT INTO repair_status_logs (repair_id, status, operator_id, operator_name, operator_role, remark, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)'
+      );
+      const studentUser = db.prepare('SELECT name, role FROM users WHERE id = ?').get(repair.student_id as number) as { name: string; role: string } | undefined;
+
+      const transaction = db.transaction(() => {
+        backfillStmt.run(
+          req.params.id, 'pending',
+          repair.student_id as number,
+          studentUser?.name || '',
+          studentUser?.role || 'student',
+          '提交报修申请',
+          repair.created_at as string
+        );
+
+        if (repair.status === 'processing' || repair.status === 'resolved') {
+          backfillStmt.run(
+            req.params.id, 'processing',
+            null, '系统', 'admin',
+            '状态变更为：处理中',
+            repair.updated_at as string
+          );
+        }
+        if (repair.status === 'resolved') {
+          backfillStmt.run(
+            req.params.id, 'resolved',
+            null, '系统', 'admin',
+            '状态变更为：已修好',
+            repair.updated_at as string
+          );
+        }
+      });
+      transaction();
+    }
+
     // Get status logs
     const logs = db.prepare(
       'SELECT * FROM repair_status_logs WHERE repair_id = ? ORDER BY created_at ASC, id ASC'
@@ -131,9 +172,25 @@ router.put('/:id/rate', (req: AuthRequest, res: Response) => {
     }
 
     const now = new Date().toLocaleString('sv-SE', { timeZone: 'Asia/Shanghai' }).replace('T', ' ');
-    db.prepare(
+
+    const updateStmt = db.prepare(
       'UPDATE repairs SET rating = ?, review = ?, updated_at = ? WHERE id = ?'
-    ).run(rating, review || null, now, req.params.id);
+    );
+    const logStmt = db.prepare(
+      'INSERT INTO repair_status_logs (repair_id, status, operator_id, operator_name, operator_role, remark) VALUES (?, ?, ?, ?, ?, ?)'
+    );
+
+    const transaction = db.transaction(() => {
+      updateStmt.run(rating, review || null, now, req.params.id);
+
+      const user = db.prepare('SELECT name, role FROM users WHERE id = ?').get(req.userId!) as { name: string; role: string } | undefined;
+      const remark = review
+        ? `完成评价：${rating}星，评价：${review}`
+        : `完成评价：${rating}星`;
+      logStmt.run(req.params.id, 'resolved', req.userId!, user?.name || '', user?.role || 'student', remark);
+    });
+
+    transaction();
 
     const updated = db.prepare('SELECT * FROM repairs WHERE id = ?').get(req.params.id) as Record<string, unknown>;
     if (typeof updated.photos === 'string') {
