@@ -373,6 +373,19 @@ export default function AdminRepairDetail() {
     }
   };
 
+  const handleQuickStatusChange = async (targetStatus: string) => {
+    setError('');
+    setSuccess('');
+    try {
+      await api.put(`/admin/repairs/${id}`, { status: targetStatus });
+      await fetchRepair();
+      setSuccess('更新成功');
+    } catch (err: unknown) {
+      const axiosErr = err as { response?: { data?: { error?: string } } };
+      setError(axiosErr.response?.data?.error || '更新失败');
+    }
+  };
+
   if (loading) {
     return (
       <div style={styles.container}>
@@ -596,7 +609,7 @@ export default function AdminRepairDetail() {
                 style={{ ...styles.btn, ...styles.btnSuccess }}
                 onClick={() => {
                   setNewStatus('processing');
-                  setTimeout(() => handleUpdate(), 0);
+                  handleQuickStatusChange('processing');
                 }}
               >
                 开始处理
@@ -607,7 +620,7 @@ export default function AdminRepairDetail() {
                 style={{ ...styles.btn, ...styles.btnWarning }}
                 onClick={() => {
                   setNewStatus('resolved');
-                  setTimeout(() => handleUpdate(), 0);
+                  handleQuickStatusChange('resolved');
                 }}
               >
                 标记已修好
